@@ -1,0 +1,168 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Flexible BFT – Live Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#0b1020;color:#eef}
+    header{padding:16px 20px;background:#121a35;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0}
+    .badge{padding:2px 8px;border-radius:999px;background:#1b254d;margin-left:8px}
+    main{display:grid;grid-template-columns: 340px 1fr; gap:16px; padding:16px;}
+    section{background:#101734;border:1px solid #1f2a55;border-radius:12px;padding:12px 12px 6px}
+    h2{margin:6px 0 12px 0;font-size:16px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    input,textarea,select,button{background:#0e1530;color:#cdf;border:1px solid #2a3a78;border-radius:8px;padding:8px;font-size:14px}
+    button{cursor:pointer}
+    .pill{display:inline-block;padding:4px 8px;border-radius:999px;background:#1a244a;border:1px solid #2a3a78;margin:2px 4px 2px 0}
+    .log{height:280px;overflow:auto;background:#0c1228;border:1px solid #1e2a57;border-radius:8px;padding:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px}
+    .list{height:140px;overflow:auto;background:#0c1228;border:1px solid #1e2a57;border-radius:8px;padding:8px}
+    .kv{display:grid;grid-template-columns: 120px 1fr; gap:6px; font-size:13px}
+    .ok{color:#5cf26b} .warn{color:#f6d365} .err{color:#ff7a7a}
+    footer{padding:8px 16px 20px; color:#9bb; font-size:12px}
+  </style>
+</head>
+<body>
+<header>
+  <div><strong>Flexible BFT – Live Dashboard</strong> <span id="state" class="badge">idle</span></div>
+  <div>
+    <button id="btnStart">Start</button>
+    <button id="btnStop">Stop</button>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>Simulation Config</h2>
+    <div class="kv">
+      <label>Replicas (n)</label><input id="replicas" type="number" value="7" min="1"/>
+      <label>f</label><input id="f" type="number" value="2" min="0"/>
+      <label>Byzantine idx</label><input id="byz" placeholder="e.g. 1,2"/>
+      <label>ABC idx</label><input id="abc" placeholder="e.g. 4"/>
+      <label>QC threshold</label><input id="qcTh" placeholder="(default 2f+1)"/>
+      <label>Drop rate</label><input id="drop" value="0.02"/>
+      <label>Delay (min,max)</label><input id="delay" value="0.01,0.05"/>
+      <label>Propose interval</label><input id="pint" value="0.15"/>
+      <label>Duration (s)</label><input id="dur" value="10"/>
+    </div>
+    <h2 style="margin-top:12px">Learners</h2>
+    <textarea id="learners" rows="6">[
+  {"name":"fast","q_fast":4,"q_commit":6},
+  {"name":"safe","q_fast":999,"q_commit":5},
+  {"name":"bank","q_fast":999,"q_commit":7}
+]</textarea>
+  </section>
+
+  <section>
+    <div class="row" style="gap:16px;">
+      <div style="flex:1">
+        <h2>Replica Events</h2>
+        <div id="evReplica" class="log"></div>
+      </div>
+      <div style="flex:1">
+        <h2>Learner Events</h2>
+        <div id="evLearner" class="log"></div>
+      </div>
+    </div>
+
+    <div class="row" style="gap:16px; margin-top:12px;">
+      <div style="flex:1">
+        <h2>Commits (Replicas)</h2>
+        <div id="commits" class="list"></div>
+      </div>
+      <div style="flex:1">
+        <h2>Config / Status</h2>
+        <div id="cfg" class="list"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Tip: try n=7, f=2, Byzantines: 1,2; Learners: fast/safe/bank with different thresholds. You’ll see different commit behaviors.
+</footer>
+
+<script>
+const elState = document.getElementById('state');
+const logR = document.getElementById('evReplica');
+const logL = document.getElementById('evLearner');
+const commits = document.getElementById('commits');
+const cfgBox = document.getElementById('cfg');
+
+function addLog(el, line, cls) {
+  const d = document.createElement('div');
+  if (cls) d.className = cls;
+  d.textContent = line;
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
+}
+function setState(s){ elState.textContent = s; }
+
+let ws;
+function connect(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => addLog(logR, '[ws] connected','ok');
+  ws.onclose = () => addLog(logR, '[ws] disconnected','warn');
+  ws.onmessage = (e)=>{
+    const msg = JSON.parse(e.data);
+    handleEvent(msg);
+  };
+}
+connect();
+
+function handleEvent(m){
+  if(m.type==='STATUS'){
+    setState(m.state);
+    cfgBox.textContent = JSON.stringify(m.config || {state:m.state}, null, 2);
+    return;
+  }
+  if(m.type==='WARN'){ addLog(logR, 'WARN: '+m.message, 'warn'); return; }
+  if(m.type==='ERROR' || m.type==='ERR'){ addLog(logR, 'ERR: '+m.message, 'err'); return; }
+  if(m.source==='replica'){
+    if(m.type==='PROPOSED') addLog(logR, `View ${m.view} | ${m.replica} proposed h=${m.block.height} id=${m.block.id.slice(0,8)}`);
+    if(m.type==='EQUIVOCATE') addLog(logR, `EQUIVOCATE by ${m.replica} view=${m.view} blocks=${m.blocks.map(x=>x.slice(0,8)).join(',')}`, 'warn');
+    if(m.type==='VOTE_SENT') addLog(logR, `${m.replica} voted for ${m.block_id.slice(0,8)} → ${m.to}`);
+    if(m.type==='VOTE_RCVD') addLog(logR, `Leader ${m.replica} got vote from ${m.voter} for ${m.block_id.slice(0,8)} [count=${m.count}]`);
+    if(m.type==='QC_FORMED') addLog(logR, `QC for ${m.block_id.slice(0,8)} (sigs=${m.sigs}) ✅`, 'ok');
+    if(m.type==='COMMIT'){
+      const d = document.createElement('div');
+      d.className='pill';
+      d.textContent = `Replica ${m.replica} COMMIT h=${m.height} id=${m.block_id.slice(0,8)} (by ${m.proposer})`;
+      commits.appendChild(d);
+    }
+  } else if(m.source==='learner'){
+    if(m.type==='LEARNER_FAST') addLog(logL, `FAST ${m.learner} -> ${m.block_id.slice(0,8)} (sigs=${m.sigs})`);
+    if(m.type==='LEARNER_SAFE') addLog(logL, `SAFE ${m.learner} -> ${m.block_id.slice(0,8)} (sigs=${m.sigs})`, 'ok');
+  } else {
+    addLog(logR, JSON.stringify(m));
+  }
+}
+
+document.getElementById('btnStart').onclick = ()=>{
+  try{
+    const cfg = {
+      replicas: parseInt(document.getElementById('replicas').value,10),
+      f: parseInt(document.getElementById('f').value,10),
+      byzantine: (document.getElementById('byz').value || '').split(',').filter(s=>s.trim()!=='').map(x=>parseInt(x,10)),
+      abc: (document.getElementById('abc').value || '').split(',').filter(s=>s.trim()!=='').map(x=>parseInt(x,10)),
+      qc_threshold: (document.getElementById('qcTh').value || '').trim()==='' ? null : parseInt(document.getElementById('qcTh').value,10),
+      drop_rate: parseFloat(document.getElementById('drop').value),
+      min_delay: parseFloat(document.getElementById('delay').value.split(',')[0]),
+      max_delay: parseFloat(document.getElementById('delay').value.split(',')[1]),
+      propose_interval: parseFloat(document.getElementById('pint').value),
+      duration: parseFloat(document.getElementById('dur').value),
+      learners: JSON.parse(document.getElementById('learners').value)
+    };
+    ws.send(JSON.stringify({type:"START", config: cfg}));
+  }catch(e){
+    alert('Invalid config: '+e.message);
+  }
+};
+
+document.getElementById('btnStop').onclick = ()=>{
+  ws.send(JSON.stringify({type:"STOP"}));
+};
+</script>
+</body>
+</html>
