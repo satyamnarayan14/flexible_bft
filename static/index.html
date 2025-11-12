@@ -38,7 +38,8 @@
       <label>Replicas (n)</label><input id="replicas" type="number" value="7" min="1"/>
       <label>f</label><input id="f" type="number" value="2" min="0"/>
       <label>Byzantine idx</label><input id="byz" placeholder="e.g. 1,2"/>
-      <label>ABC idx</label><input id="abc" placeholder="e.g. 4"/>
+      
+      
       <label>QC threshold</label><input id="qcTh" placeholder="(default 2f+1)"/>
       <label>Drop rate</label><input id="drop" value="0.02"/>
       <label>Delay (min,max)</label><input id="delay" value="0.01,0.05"/>
@@ -145,7 +146,7 @@ document.getElementById('btnStart').onclick = ()=>{
       replicas: parseInt(document.getElementById('replicas').value,10),
       f: parseInt(document.getElementById('f').value,10),
       byzantine: (document.getElementById('byz').value || '').split(',').filter(s=>s.trim()!=='').map(x=>parseInt(x,10)),
-      abc: (document.getElementById('abc').value || '').split(',').filter(s=>s.trim()!=='').map(x=>parseInt(x,10)),
+    
       qc_threshold: (document.getElementById('qcTh').value || '').trim()==='' ? null : parseInt(document.getElementById('qcTh').value,10),
       drop_rate: parseFloat(document.getElementById('drop').value),
       min_delay: parseFloat(document.getElementById('delay').value.split(',')[0]),
